@@ -64,9 +64,6 @@ func checkEnvVars(vars []string) error {
 
 func Serve(stdin io.Reader, stdout, stderr io.Writer) {
 	requiredVars := []string{
-		"AWS_REGION",
-		"AWS_ACCESS_KEY_ID",
-		"AWS_SECRET_ACCESS_KEY",
 		"AWS_S3_ENDPOINT",
 		"S3_BUCKET",
 	}
