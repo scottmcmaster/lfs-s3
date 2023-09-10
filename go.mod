@@ -5,6 +5,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.5
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.11.44
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.30.0
+	github.com/joho/godotenv v1.5.1
 )
 
 require (

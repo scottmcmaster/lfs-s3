@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"git.sr.ht/~ngraves/lfs-s3/service"
+
+	_ "github.com/joho/godotenv/autoload"
 )
 
 var Version = "Custom build"
