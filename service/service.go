@@ -64,7 +64,7 @@ func checkEnvVars(vars []string) error {
 
 func Serve(stdin io.Reader, stdout, stderr io.Writer) {
 	requiredVars := []string{
-		"AWS_S3_ENDPOINT",
+		//"AWS_S3_ENDPOINT",
 		"S3_BUCKET",
 	}
 
@@ -111,27 +111,29 @@ func createS3Client() (*s3.Client, error) {
 	region := os.Getenv("AWS_REGION")
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	endpointURL := os.Getenv("AWS_S3_ENDPOINT")
+	//endpointURL := os.Getenv("AWS_S3_ENDPOINT")
 	profile := os.Getenv("AWS_PROFILE")
 
 	var cfg aws.Config
 	var err error
 
-	endpointResolverFunc := aws.EndpointResolverWithOptionsFunc(
-		func(service, _ string, options ...interface{}) (aws.Endpoint, error) {
-			return aws.Endpoint{URL: endpointURL, SigningRegion: region}, nil
-		})
+	// endpointResolverFunc := aws.EndpointResolverWithOptionsFunc(
+	// 	func(service, _ string, options ...interface{}) (aws.Endpoint, error) {
+	// 		return aws.Endpoint{URL: endpointURL, SigningRegion: region}, nil
+	// 	})
 
 	if len(profile) > 0 {
 		// Profile wins if it's defined.
 		cfg, err = config.LoadDefaultConfig(context.TODO(),
 			config.WithSharedConfigProfile(profile),
-			config.WithEndpointResolverWithOptions(endpointResolverFunc),
+			config.WithRegion(region),
+			//config.WithEndpointResolverWithOptions(endpointResolverFunc),
 		)
 	} else {
 		// Else fall back to access and secret keys.
 		cfg, err = config.LoadDefaultConfig(context.TODO(),
-			config.WithEndpointResolverWithOptions(endpointResolverFunc),
+			//config.WithEndpointResolverWithOptions(endpointResolverFunc),
+			config.WithRegion(region),
 			config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 				return aws.Credentials{
 					AccessKeyID:     accessKey,
