@@ -54,31 +54,28 @@ func (rw *progressTracker) WriteAt(p []byte, off int64) (n int, err error) {
 }
 
 func checkEnvVars(vars []string) error {
-    for _, v := range vars {
-        if value := os.Getenv(v); value == "" {
-            return fmt.Errorf("environment variable %s not defined", v)
-        }
-    }
-    return nil
+	for _, v := range vars {
+		if value := os.Getenv(v); value == "" {
+			return fmt.Errorf("environment variable %s not defined", v)
+		}
+	}
+	return nil
 }
 
 func Serve(stdin io.Reader, stdout, stderr io.Writer) {
 	requiredVars := []string{
-		"AWS_REGION",
-		"AWS_ACCESS_KEY_ID",
-		"AWS_SECRET_ACCESS_KEY",
-		"AWS_S3_ENDPOINT",
 		"S3_BUCKET",
 	}
 
 	scanner := bufio.NewScanner(stdin)
 	writer := io.Writer(stdout)
 
+scanner:
 	for scanner.Scan() {
 		line := scanner.Text()
 		var req api.Request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			fmt.Fprintf(stderr, fmt.Sprintf("Error reading input: %s\n", err))
+			fmt.Fprintf(stderr, "Error reading input: %s\n", err)
 			return
 		}
 
@@ -97,36 +94,49 @@ func Serve(stdin io.Reader, stdout, stderr io.Writer) {
 			resp := &api.InitResponse{}
 			api.SendResponse(resp, writer, stderr)
 		case "download":
-			fmt.Fprintf(stderr, fmt.Sprintf("Received download request for %s\n", req.Oid))
+			fmt.Fprintf(stderr, "Received download request for %s\n", req.Oid)
 			retrieve(req.Oid, req.Size, writer, stderr)
 		case "upload":
-			fmt.Fprintf(stderr, fmt.Sprintf("Received upload request for %s\n", req.Oid))
+			fmt.Fprintf(stderr, "Received upload request for %s\n", req.Oid)
 			store(req.Oid, req.Size, writer, stderr)
 		case "terminate":
 			fmt.Fprintf(stderr, "Terminating test custom adapter gracefully.\n")
-			break
+			break scanner
 		}
 	}
 }
 
-func createS3Client() *s3.Client {
+func createS3Client() (*s3.Client, error) {
 	region := os.Getenv("AWS_REGION")
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	endpointURL := os.Getenv("AWS_S3_ENDPOINT")
+	profile := os.Getenv("AWS_PROFILE")
 
-	cfg, _ := config.LoadDefaultConfig(context.TODO(),
-		config.WithEndpointResolver(aws.EndpointResolverFunc(
-			func(service, _ string) (aws.Endpoint, error) {
-				return aws.Endpoint{URL: endpointURL, SigningRegion: region}, nil
+	var cfg aws.Config
+	var err error
+
+	if len(profile) > 0 {
+		// Profile wins if it's defined.
+		cfg, err = config.LoadDefaultConfig(context.TODO(),
+			config.WithSharedConfigProfile(profile),
+			config.WithRegion(region),
+		)
+	} else {
+		// Else fall back to access and secret keys.
+		cfg, err = config.LoadDefaultConfig(context.TODO(),
+			config.WithRegion(region),
+			config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+				return aws.Credentials{
+					AccessKeyID:     accessKey,
+					SecretAccessKey: secretKey,
+				}, nil
 			})),
-		config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
-			return aws.Credentials{
-				AccessKeyID:     accessKey,
-				SecretAccessKey: secretKey,
-			}, nil
-		})),
-	)
+		)
+	}
+
+	if err != nil {
+		return nil, err
+	}
 
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
 		usePathStyle, err := strconv.ParseBool(os.Getenv("S3_USEPATHSTYLE"))
@@ -134,17 +144,21 @@ func createS3Client() *s3.Client {
 			usePathStyle = false
 		}
 		o.UsePathStyle = usePathStyle
-	})
+	}), nil
 }
 
 func retrieve(oid string, size int64, writer io.Writer, stderr io.Writer) {
-	client := createS3Client()
+	client, err := createS3Client()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error creating client: %v\n", err)
+		return
+	}
 	bucketName := os.Getenv("S3_BUCKET")
 
 	localPath := ".git/lfs/objects/" + oid[:2] + "/" + oid[2:4] + "/" + oid
 	file, err := os.Create(localPath)
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Error creating file: %v\n", err))
+		fmt.Fprintf(stderr, "Error creating file: %v\n", err)
 		return
 	}
 	defer func() {
@@ -172,25 +186,29 @@ func retrieve(oid string, size int64, writer io.Writer, stderr io.Writer) {
 	})
 
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Error downloading file: %v\n", err))
+		fmt.Fprintf(stderr, "Error downloading file: %v\n", err)
 		return
 	}
 
 	complete := &api.TransferResponse{Event: "complete", Oid: oid, Path: localPath, Error: nil}
 	err = api.SendResponse(complete, writer, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Unable to send completion message: %v\n", err))
+		fmt.Fprintf(stderr, "Unable to send completion message: %v\n", err)
 	}
 }
 
 func store(oid string, size int64, writer io.Writer, stderr io.Writer) {
-	client := createS3Client()
+	client, err := createS3Client()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error creating client: %v\n", err)
+		return
+	}
 	bucketName := os.Getenv("S3_BUCKET")
 
 	localPath := ".git/lfs/objects/" + oid[:2] + "/" + oid[2:4] + "/" + oid
 	file, err := os.Open(localPath)
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Error opening file: %v\n", err))
+		fmt.Fprintf(stderr, "Error opening file: %v\n", err)
 		return
 	}
 	defer func() {
@@ -218,13 +236,13 @@ func store(oid string, size int64, writer io.Writer, stderr io.Writer) {
 	})
 
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Error uploading file: %v\n", err))
+		fmt.Fprintf(stderr, "Error uploading file: %v\n", err)
 		return
 	}
 
 	complete := &api.TransferResponse{Event: "complete", Oid: oid, Error: nil}
 	err = api.SendResponse(complete, writer, stderr)
 	if err != nil {
-		fmt.Fprintf(stderr, fmt.Sprintf("Unable to send completion message: %v\n", err))
+		fmt.Fprintf(stderr, "Unable to send completion message: %v\n", err)
 	}
 }
