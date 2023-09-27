@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -154,6 +158,11 @@ func retrieve(oid string, size int64, writer io.Writer, stderr io.Writer) {
 		return
 	}
 	bucketName := os.Getenv("S3_BUCKET")
+	keyPrefix, err := getGitRepoName()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error getting git repo name from cwd: %v\n", err)
+		return
+	}
 
 	localPath := ".git/lfs/objects/" + oid[:2] + "/" + oid[2:4] + "/" + oid
 	file, err := os.Create(localPath)
@@ -182,7 +191,7 @@ func retrieve(oid string, size int64, writer io.Writer, stderr io.Writer) {
 
 	_, err = downloader.Download(context.Background(), progressWriter, &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
-		Key:    aws.String(oid),
+		Key:    aws.String(path.Join(keyPrefix, oid)),
 	})
 
 	if err != nil {
@@ -204,6 +213,11 @@ func store(oid string, size int64, writer io.Writer, stderr io.Writer) {
 		return
 	}
 	bucketName := os.Getenv("S3_BUCKET")
+	keyPrefix, err := getGitRepoName()
+	if err != nil {
+		fmt.Fprintf(stderr, "Error getting git repo name from cwd: %v\n", err)
+		return
+	}
 
 	localPath := ".git/lfs/objects/" + oid[:2] + "/" + oid[2:4] + "/" + oid
 	file, err := os.Open(localPath)
@@ -231,7 +245,7 @@ func store(oid string, size int64, writer io.Writer, stderr io.Writer) {
 
 	_, err = uploader.Upload(context.Background(), &s3.PutObjectInput{
 		Bucket: aws.String(bucketName),
-		Key:    aws.String(oid),
+		Key:    aws.String(path.Join(keyPrefix, oid)),
 		Body:   progressReader,
 	})
 
@@ -245,4 +259,29 @@ func store(oid string, size int64, writer io.Writer, stderr io.Writer) {
 	if err != nil {
 		fmt.Fprintf(stderr, "Unable to send completion message: %v\n", err)
 	}
+}
+
+func getGitRepoName() (string, error) {
+	// Get the current working directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	// Get the root directory of the repository
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = currentDir
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// Clean up to an absolute path
+	rootDir := strings.TrimSpace(string(output))
+
+	// Extract the repository name as the last part of the path
+	repoName := filepath.Base(rootDir)
+
+	return repoName, nil
 }
